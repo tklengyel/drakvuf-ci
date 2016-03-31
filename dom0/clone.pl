@@ -120,12 +120,7 @@ use warnings;
 ## Settings
 #
 # The LVM volume group
-our $lvm_vg = "t0vg";
-# Clone network bridge name
-our $clone_bridge = "xenbr1";
-# Vif script to pass to clone Xen config.
-# The backend specifies the name of the openvswitch domain.
-our $vif_script = "script=vif-openvswitch,backend=openvswitch";
+our $lvm_vg = "t1vg";
 
 ############################################################
 
@@ -133,110 +128,37 @@ our $lvcreate = `which lvcreate`;
 our $lvremove = `which lvremove`;
 our $lvdisplay = `which lvdisplay`;
 our $xl = "/usr/local/sbin/xl";
-our $mkfifo = "/usr/bin/mkfifo";
 
 $lvcreate =~ s/\015?\012?$//;;
 $lvremove =~ s/\015?\012?$//;;
 $lvdisplay =~ s/\015?\012?$//;;
 $xl =~ s/\015?\012?$//;;
-$mkfifo =~ s/\015?\012?$//;
 
 sub clone {
-    if (@ARGV != 3) {
-        die "Insufficient number of arguments!\nUsage: ./clone.pl <domain name> <vlan> <path/to/domain.cfg>\n";
+    if (@ARGV != 1) {
+        die "Insufficient number of arguments!\nUsage: ./clone.pl <domain>\n";
     }
 
-    my $origin = $_[0];
-    my $vlan = $_[1];
-    my $config = $_[2];
-    my $clone = "$origin-$vlan-clone";
+    my $domain = $_[0];
 
-    my $origin_test = `$xl domid $origin`;
-    if(length $origin_test == 0) {
-        die "0";
+    my $domain_test = `$xl domid $domain-jenkins 2>/dev/null`;
+    if(length $domain_test) {
+        `$xl destroy $domain-jenkins`;
     }
 
-    my $clone_test = `$xl domid $clone 2>/dev/null`;
-    if(length $clone_test) {
-        `$xl destroy $clone`;
-    }
-
-    unless (-e $config) {
-        die "0";
-    }
-
-    my $domconfig = `cat $config`;
-
-    open(my $fh, '>', "/tmp/$clone.config") or die "Could not open file!";
-
-    while($domconfig =~ /([^\n]+)\n?/g){
-
-        if(index($1, "name") != -1) {
-            print $fh "name = \"$clone\"\n";
-            next;
-        }
-
-        if(index($1, "vif") != -1) {
-            my @values = split(',', $1);
-            my $value;
-            my $count = 0;
-            foreach $value (@values) {
-                if(index($value, "bridge")!=-1 && index($value, "vif-bridge")==-1) {
-                    print $fh "bridge=$clone_bridge.$vlan,$vif_script";
-                } else {
-                    if(index($value, "script")==-1 && index($value, "backend")==-1) {
-                        print $fh "$value";
-                    } else {
-                        if($count == $#values) {
-                            print $fh "']";
-                        }
-                    }
-                }
-
-                if($count < $#values) {
-                    print $fh ",";
-                }
-                $count++;
-            }
-            print $fh "\n";
-            next;
-        }
-
-        if(index($1, "disk") != -1) {
-            my $disk = $1;
-            my $pos = index($disk, $origin);
-            while ( $pos > -1 ) {
-                substr( $disk, $pos, length( $origin ), $clone );
-                $pos = index( $disk, $origin, $pos + length( $clone ));
-            }
-            print $fh $disk;
-            print $fh "\n";
-            next;
-        }
-
-        print $fh "$1\n";
-    }
-
-    # TODO: evaluate qemu stubdomain usability
-    #print $fh "device_model_stubdomain_override = 1\n";
-    close $fh;
-
-    `$xl pause $origin 2>&1`;
-
-    my $test = `$lvdisplay /dev/$lvm_vg/$clone 2>&1`;
+    my $test = `$lvdisplay /dev/$lvm_vg/$domain-clone 2>&1`;
     if(($test =~ tr/\n//) != 1) {
        #print "Removing existing LVM snapshot of $clone\n";
-        `$lvremove -f /dev/$lvm_vg/$clone 2>&1`;
+        `$lvremove -f /dev/$lvm_vg/$domain-clone 2>&1`;
     }
 
-    `$lvcreate -s -n $clone -L20G /dev/$lvm_vg/$origin 2>&1`;
-    `$mkfifo /tmp/drakvuf_pipe_$clone 2>&1`;
-    `$xl save -c $origin /tmp/drakvuf_pipe_$clone 2>&1 | $xl restore -p -e /tmp/$clone.config /tmp/drakvuf_pipe_$clone 2>&1`;
-    my $cloneID = `$xl domid $clone`;
+    `$lvcreate -s -n $domain-clone -L20G /dev/$lvm_vg/$domain 2>&1`;
+    `$xl restore -p -e /share/work/drakvuf-ci/dom0/$domain.cfg /share/work/drakvuf-ci/dom0/$domain.save 2>&1`;
+    my $cloneID = `$xl domid $domain-jenkins`;
     chomp($cloneID);
     print "$cloneID";
 }
 
 ############################################################
 
-clone($ARGV[0], $ARGV[1], $ARGV[2]);
+clone($ARGV[0]);
