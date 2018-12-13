@@ -120,7 +120,7 @@ use warnings;
 ## Settings
 #
 # The LVM volume group
-our $lvm_vg = "t1vg";
+our $lvm_vg = "t0vg";
 
 ############################################################
 
@@ -146,14 +146,14 @@ sub clone {
         `$xl destroy $domain-jenkins`;
     }
 
-    my $test = `$lvdisplay /dev/$lvm_vg/$domain-clone 2>&1`;
+    my $test = `$lvdisplay /dev/$lvm_vg/$domain-jenkins 2>&1`;
     if(($test =~ tr/\n//) != 1) {
        #print "Removing existing LVM snapshot of $clone\n";
-        `$lvremove -f /dev/$lvm_vg/$domain-clone 2>&1`;
+        `$lvremove -f /dev/$lvm_vg/$domain-jenkins 2>&1`;
     }
 
-    `$lvcreate -s -n $domain-clone -L20G /dev/$lvm_vg/$domain 2>&1`;
-    `$xl restore -p -e /share/work/drakvuf-ci/dom0/$domain.cfg /share/work/drakvuf-ci/dom0/$domain.save 2>&1`;
+    `$lvcreate -s -n $domain-jenkins -L20G /dev/$lvm_vg/$domain 2>&1`;
+    `$xl restore -e -p /share/work/drakvuf-ci/dom0/$domain.cfg /share/work/drakvuf-ci/dom0/$domain.save 2>&1`;
     my $cloneID = `$xl domid $domain-jenkins`;
     chomp($cloneID);
     print "$cloneID";

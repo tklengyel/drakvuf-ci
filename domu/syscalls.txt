@@ -1,0 +1,4 @@
+NtReadVirtualMemory
+NtCallbackReturn
+NtClose
+NtYieldExecution
