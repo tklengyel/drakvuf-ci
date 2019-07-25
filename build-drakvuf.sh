@@ -19,7 +19,8 @@ export LD_LIBRARY_PATH='/opt/libvmi/lib'
 export LDFLAGS='-L/opt/libvmi/lib'
 export CFLAGS='-I/opt/libvmi/include'
 export PYTHONPATH='/opt/libvmi/lib/python2.7/site-packages/'
-export CXX='clang++-6.0'
+export CXX='clang++'
+export CC="clang"
 
 # Build
 ./autogen.sh || error_exit
