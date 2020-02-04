@@ -6,16 +6,22 @@ timeout=80 # in seconds
 vm="$1"
 workspace="$2"
 libvmipath="$3"
+reset=${4:-"-"}
+outfolder=/shared/tmp
+cfgfolder=/shared/cfg
+cifolder=/shared/drakvuf-ci
+
+. $cifolder/findpid.sh
 
 #############################################################
 findpid() {
-    ps aux | grep drakvuf | grep $1 | grep -v timeout | grep -v sudo | grep -v "drakvuf-ci" | awk '{print $2}'
+    ps aux | grep drakvuf | grep $1 | grep -v timeout | grep -v sudo | grep -v "drakvuf-ci" | grep -m 1 drakvuf | awk '{print $2}'
 }
 
 overhead() {
     local pid=$1
     local timer=$2
-    local count=0
+    local count=1
     local overhead=0
 
     while [ $count -ne $runtime ]; do
@@ -44,19 +50,25 @@ injector() {
     pid=$2
     injector_mode=$3
 
+    if [ $pid -eq 0 ]; then
+        exit 1;
+    fi
+
     echo "Running Injector for calc.exe through PID $pid with $injector_mode:"
 
     LD_LIBRARY_PATH=$libvmipath/lib \
         timeout --preserve-status -k $timeout $sigtime \
-        $workspace/src/injector -v -r /ssd-storage/cfg/$vm.json -d $domid -i $pid -e calc.exe -m $injector_mode -j $runtime\
-        1>/tmp/$vm.$injector_mode.output.txt 2>&1
+        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -i $pid -e calc.exe -m $injector_mode -j $runtime\
+        1>$outfolder/$vm.$injector_mode.output.txt 2>&1
 
     if [ $? -ne 0 ]; then
-        cat /tmp/$vm.$injector_mode.output.txt
+        cat $outfolder/$vm.$injector_mode.output.txt
+        rm $outfolder/$vm.$injector_mode.output.txt
         destroy $domid
         exit 1
     fi
 
+    rm $outfolder/$vm.$injector_mode.output.txt
     echo "Injection with $injector_mode worked";
 }
 
@@ -93,15 +105,15 @@ drakvuf() {
  	LD_LIBRARY_PATH=$libvmipath/lib \
         timeout --preserve-status -k $timeout $sigtime \
             $workspace/src/drakvuf \
-                -v \
-                -r /ssd-storage/cfg/$vm.json \
+                -r $cfgfolder/$vm.json \
                 -d $domid \
                 -t $runtime \
                 -p \
                 -b \
                 -o $output \
                 $opts \
-            1>/tmp/$vm.$runid.output.txt 2>&1 &
+            2>$outfolder/$vm.$runid.error.txt | grep -i syscall | wc -l > $outfolder/$vm.$runid.output.txt &
+#            2>$outfolder/$vm.$runid.error.txt 1>$outfolder/$vm.$runid.output.txt &
 
     waitfor=0
     drakvuf_pid=$(findpid $vm)
@@ -123,10 +135,6 @@ drakvuf() {
     cpu_overhead=$?
     echo "CPU utilization average: $cpu_overhead"
 
-    syscalls=$(cat /tmp/$vm.$runid.output.txt | grep -i SYSCALL | wc -l)
-
-    echo "Syscalls: $syscalls"
-
     kill -0 $drakvuf_pid 2>/dev/null
     while [ $? -eq 0 ]
     do
@@ -134,9 +142,15 @@ drakvuf() {
         kill -0 $drakvuf_pid 2>/dev/null
     done
 
-    if [ $syscalls -lt 10 ]; then
-        cat /tmp/$vm.$runid.output.txt
+    sleep 1
+    syscalls=$(cat $outfolder/$vm.$runid.output.txt)
+#    syscalls=$(cat $outfolder/$vm.$runid.output.txt | grep -i syscall | wc -l)
+    echo "Syscalls: $syscalls"
+
+    re='^[0-9]+$'
+    if ! [[ $syscalls =~ $re ]] || [ $syscalls -lt 10 ]; then
 	    destroy $domid
+        cat $outfolder/$vm.$runid.error.txt
         exit 1
     fi
 
@@ -145,33 +159,42 @@ drakvuf() {
 #################################################################
 
 
-echo "Running environment reset..";
-reset_result=$(/shared/drakvuf-ci/reset.sh $vm)
-echo "Reset result: $reset_result"
+if [ $reset != "-" ]; then
+    echo "Running environment reset..";
+    reset_result=$($cifolder/reset.sh $vm)
+    echo "Reset result: $reset_result"
 
-if [ $reset_result == "error" ]; then
-    reset_result=$(/shared/drakvuf-ci/reset.sh $vm);
-    echo "Re-trying reset: $reset_result";
-fi
+    if [ $reset_result == "error" ]; then
+        reset_result=$($cifolder/reset.sh $vm);
+        echo "Re-trying reset: $reset_result";
+    fi
 
-if [ $reset_result == "error" ]; then
-    exit 1
+    if [ $reset_result == "error" ]; then
+        exit 1
+    fi
+else
+    domid=$(xl domid "$vm-jenkins")
+    pids=$(findpids $vm)
+    reset_result="$domid:$pids"
 fi
 
 values=(${reset_result//:/ })
-
 domid=${values[0]}
 tpid=${values[1]}
 epid=${values[2]}
 
+if [ -z $domid ] || [ $domid -eq 0 ]; then
+    exit 1;
+fi
+
 if [ $vm == "windows7-sp1-x64" ]; then
-    echo "Received Windows 7 x64 Test VM ID: $domid";
+    echo "Received Windows 7 x64 Test VM ID: $domid $tpid $epid";
 
     injector $domid $tpid createproc
     injector $domid $epid shellexec
-    drakvuf $domid 1 $tpid  createproc  csv
+    drakvuf $domid 1 $tpid createproc  csv
     drakvuf $domid 2 0      0           json    /shared/syscalls.txt
-    drakvuf $domid 3 0      0           default x                    x x /shared/windows7-sp1-x64/win32k.json
+    #drakvuf $domid 3 0      0           default x                    x x /shared/windows7-sp1-x64/win32k.json
 
     if [ $? -gt 90 ]; then
         echo "Overhead is a lot"
@@ -182,13 +205,13 @@ if [ $vm == "windows7-sp1-x64" ]; then
 fi
 
 if [ $vm == "windows10" ]; then
-    echo "Received Windows 10 x64 Test VM ID: $domid";
+    echo "Received Windows 10 x64 Test VM ID: $domid $tpid $epid";
 
-    sleep 120
+    #sleep 120
 
     injector $domid $tpid createproc
-    injector $domid $epid shellexec
-    drakvuf $domid 1 $tpid createproc csv
+    #injector $domid $epid shellexec
+    drakvuf $domid 1 $tpid createproc  csv /shared/syscalls.txt
     drakvuf $domid 2 0 0 json /shared/syscalls.txt
 
     if [ $? -gt 95 ]; then
@@ -199,23 +222,8 @@ if [ $vm == "windows10" ]; then
     exit 0
 fi
 
-if [ $vm == "windows10-1903" ]; then
-    echo "Received Windows 10 1903 x64 Test VM ID: $domid";
-
-    sleep 120
-
-    drakvuf $domid 1 0 0 json /shared/syscalls.txt
-
-    if [ $? -gt 95 ]; then
-        echo "Overhead is a lot"
-        exit 1
-    fi
-
-    exit 0
-fi
-
 if [ $vm == "windows7-sp1-x86" ]; then
-    echo "Received Windows 7 x86 Test VM ID: $domid";
+    echo "Received Windows 7 x86 Test VM ID: $domid $tpid $epid";
 
     injector $domid $tpid createproc
     drakvuf $domid 1 $tpid createproc csv

@@ -14,17 +14,17 @@ function error_exit
 cd "$WORKSPACE"
 git_clean
 
-export PKG_CONFIG_PATH='/opt/libvmi/lib/pkgconfig/'
-export LD_LIBRARY_PATH='/opt/libvmi/lib'
-export LDFLAGS='-L/opt/libvmi/lib'
-export CFLAGS='-I/opt/libvmi/include'
-export PYTHONPATH='/opt/libvmi/lib/python2.7/site-packages/'
-export CXX='clang++'
+export PKG_CONFIG_PATH="$LIBVMI/lib/pkgconfig/"
+export LD_LIBRARY_PATH="$LIBVMI/lib"
+export LDFLAGS="-L$LIBVMI/lib"
+export CFLAGS="-I$LIBVMI/include"
+export PYTHONPATH="$LIBVMI/lib/python2.7/site-packages/"
+export CXX="clang++"
 export CC="clang"
 
 # Build
 ./autogen.sh || error_exit
-./configure --enable-debug || error_exit
+./configure "$1" || error_exit
 make -j4 || error_exit
 
 exit 0
