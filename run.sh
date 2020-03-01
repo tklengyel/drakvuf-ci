@@ -82,6 +82,7 @@ drakvuf() {
     tcpip=${7:-"x"}
     wow64=${8:-"x"}
     win32k=${9:-"x"}
+    dllhooks=${10:-"x"}
 
     opts=""
     if [ $pid -ne 0 ]; then
@@ -92,13 +93,17 @@ drakvuf() {
         opts="$opts -a syscalls"
     fi
     if [ $tcpip != "x" ]; then
-        opts="$opts --rekall-tcpip $tcpip"
+        opts="$opts --json-tcpip $tcpip"
     fi
     if [ $wow64 != "x" ]; then
-        opts="$opts --rekall-wow $wow64"
+        opts="$opts --json-wow $wow64"
     fi
     if [ $win32k != "x" ]; then
-        opts="$opts --rekall-win32k $win32k"
+        opts="$opts --json-win32k $win32k"
+    fi
+    if [ $dllhooks != "x" ]; then
+        opts="$opts --dll-hooks $dllhooks"
+        opts="$opts -a memdump"
     fi
 
     echo "Running DRAKVUF #$runid for $runtime seconds. Opts: $opts"
@@ -108,12 +113,15 @@ drakvuf() {
                 -r $cfgfolder/$vm.json \
                 -d $domid \
                 -t $runtime \
-                -p \
                 -b \
                 -o $output \
                 $opts \
-            2>$outfolder/$vm.$runid.error.txt | grep -i syscall | wc -l > $outfolder/$vm.$runid.output.txt &
-#            2>$outfolder/$vm.$runid.error.txt 1>$outfolder/$vm.$runid.output.txt &
+            2>$outfolder/$vm.$runid.error.txt | \
+            tee >(grep -i syscall | wc -l > $outfolder/$vm.$runid.syscall.txt) \
+                >(grep -i memdump | grep CharLowerA | grep "0x41" | wc -l > $outfolder/$vm.$runid.memdump.charlowera.txt) \
+                >(grep -i memdump | grep SetRect | grep C0DEC0DE | wc -l > $outfolder/$vm.$runid.memdump.setrect.txt) \
+            >/dev/null &
+#            >$outfolder/$vm.$runid.stdout.txt &
 
     waitfor=0
     drakvuf_pid=$(findpid $vm)
@@ -143,8 +151,7 @@ drakvuf() {
     done
 
     sleep 1
-    syscalls=$(cat $outfolder/$vm.$runid.output.txt)
-#    syscalls=$(cat $outfolder/$vm.$runid.output.txt | grep -i syscall | wc -l)
+    syscalls=$(cat $outfolder/$vm.$runid.syscall.txt)
     echo "Syscalls: $syscalls"
 
     re='^[0-9]+$'
@@ -152,6 +159,24 @@ drakvuf() {
 	    destroy $domid
         cat $outfolder/$vm.$runid.error.txt
         exit 1
+    fi
+
+    if [ $dllhooks != "x" ]; then
+        dllhooktest=$(cat $outfolder/$vm.$runid.memdump.charlowera.txt)
+        echo "CharLowerA: $dllhooktest"
+        if [ $dllhooktest -lt 3 ]; then
+            destroy $domid
+            cat $outfolder/$vm.$runid.error.txt
+            exit 1
+        fi
+
+        dllhooktest=$(cat $outfolder/$vm.$runid.memdump.setrect.txt)
+        echo "SetRect: $dllhooktest"
+        if [ $dllhooktest -lt 3 ]; then
+            destroy $domid
+            cat $outfolder/$vm.$runid.error.txt
+            exit 1
+        fi
     fi
 
     return $cpu_overhead
@@ -212,13 +237,12 @@ if [ $vm == "windows10" ]; then
     injector $domid $tpid createproc
     #injector $domid $epid shellexec
     drakvuf $domid 1 $tpid createproc  csv /shared/syscalls.txt
-    drakvuf $domid 2 0 0 json /shared/syscalls.txt
+    drakvuf $domid 2 0      0   json /shared/syscalls.txt x x x /shared/dllhooks.txt
 
     if [ $? -gt 95 ]; then
         echo "Overhead is a lot"
         exit 1
     fi
-
     exit 0
 fi
 
