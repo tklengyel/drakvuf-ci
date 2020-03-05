@@ -103,7 +103,7 @@ drakvuf() {
     fi
     if [ $dllhooks != "x" ]; then
         opts="$opts --dll-hooks $dllhooks"
-        opts="$opts -a memdump"
+        opts="$opts -a memdump -a apimon"
     fi
 
     echo "Running DRAKVUF #$runid for $runtime seconds. Opts: $opts"
@@ -118,8 +118,8 @@ drakvuf() {
                 $opts \
             2>$outfolder/$vm.$runid.error.txt | \
             tee >(grep -i syscall | wc -l > $outfolder/$vm.$runid.syscall.txt) \
-                >(grep -i memdump | grep CharLowerA | grep "0x41" | wc -l > $outfolder/$vm.$runid.memdump.charlowera.txt) \
-                >(grep -i memdump | grep SetRect | grep C0DEC0DE | wc -l > $outfolder/$vm.$runid.memdump.setrect.txt) \
+                >(grep -i apimon | grep CharLowerA | grep "0x41" | wc -l > $outfolder/$vm.$runid.memdump.charlowera.txt) \
+                >(grep -i apimon | grep SetRect | grep -i "0xC0DEC0DE" | wc -l > $outfolder/$vm.$runid.memdump.setrect.txt) \
             >/dev/null &
 #            >$outfolder/$vm.$runid.stdout.txt &
 
