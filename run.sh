@@ -14,7 +14,7 @@ cifolder=/shared/drakvuf-ci
 . $cifolder/findpid.sh
 
 #############################################################
-findpid() {
+finddrakvufpid() {
     ps aux | grep drakvuf | grep $1 | grep -v timeout | grep -v sudo | grep -v "drakvuf-ci" | grep -m 1 drakvuf | awk '{print $2}'
 }
 
@@ -89,7 +89,8 @@ drakvuf() {
         opts="$opts -i $pid -e calc.exe -m $injector_mode"
     fi
     if [ $filter != "x" ]; then
-        opts="$opts -S $filter"
+        path=$workspace/$filter
+        opts="$opts -S $path"
         opts="$opts -a syscalls"
     fi
     if [ $tcpip != "x" ]; then
@@ -102,8 +103,9 @@ drakvuf() {
         opts="$opts --json-win32k $win32k"
     fi
     if [ $dllhooks != "x" ]; then
-        opts="$opts --dll-hooks $dllhooks"
-        opts="$opts -a memdump"
+        path=$workspace/$dllhooks
+        opts="$opts -a memdump -a apimon"
+        opts="$opts --dll-hooks $path"
     fi
 
     echo "Running DRAKVUF #$runid for $runtime seconds. Opts: $opts"
@@ -118,13 +120,13 @@ drakvuf() {
                 $opts \
             2>$outfolder/$vm.$runid.error.txt | \
             tee >(grep -i syscall | wc -l > $outfolder/$vm.$runid.syscall.txt) \
-                >(grep -i memdump | grep CharLowerA | grep "0x41" | wc -l > $outfolder/$vm.$runid.memdump.charlowera.txt) \
-                >(grep -i memdump | grep SetRect | grep C0DEC0DE | wc -l > $outfolder/$vm.$runid.memdump.setrect.txt) \
+                >(egrep -i 'apimon|memdump' | grep CharLowerA | grep "0x41" | wc -l > $outfolder/$vm.$runid.apimon.charlowera.txt) \
+                >(egrep -i 'apimon|memdump' | grep SetRect | grep -i "0xC0DEC0DE" | wc -l > $outfolder/$vm.$runid.apimon.setrect.txt) \
             >/dev/null &
 #            >$outfolder/$vm.$runid.stdout.txt &
 
     waitfor=0
-    drakvuf_pid=$(findpid $vm)
+    drakvuf_pid=$(finddrakvufpid $vm)
     while [ -z "$drakvuf_pid" ]
     do
         ((waitfor++));
@@ -134,7 +136,7 @@ drakvuf() {
         fi
 
         sleep 1
-        drakvuf_pid=$(findpid $vm)
+        drakvuf_pid=$(finddrakvufpid $vm)
     done
 
     echo "DRAKVUF is running with PID $drakvuf_pid"
@@ -162,7 +164,7 @@ drakvuf() {
     fi
 
     if [ $dllhooks != "x" ]; then
-        dllhooktest=$(cat $outfolder/$vm.$runid.memdump.charlowera.txt)
+        dllhooktest=$(cat $outfolder/$vm.$runid.apimon.charlowera.txt)
         echo "CharLowerA: $dllhooktest"
         if [ $dllhooktest -lt 3 ]; then
             destroy $domid
@@ -170,7 +172,7 @@ drakvuf() {
             exit 1
         fi
 
-        dllhooktest=$(cat $outfolder/$vm.$runid.memdump.setrect.txt)
+        dllhooktest=$(cat $outfolder/$vm.$runid.apimon.setrect.txt)
         echo "SetRect: $dllhooktest"
         if [ $dllhooktest -lt 3 ]; then
             destroy $domid
@@ -218,10 +220,12 @@ if [ $vm == "windows7-sp1-x64" ]; then
     injector $domid $tpid createproc
     injector $domid $epid shellexec
     drakvuf $domid 1 $tpid createproc  csv
-    drakvuf $domid 2 0      0           json    /shared/syscalls.txt
+    drakvuf $domid 2 0      0           json    ci/syscalls.txt
     #drakvuf $domid 3 0      0           default x                    x x /shared/windows7-sp1-x64/win32k.json
 
-    if [ $? -gt 90 ]; then
+    overhead=$?
+
+    if [ $overhead -gt 90 ]; then
         echo "Overhead is a lot"
         exit 1
     fi
@@ -236,10 +240,12 @@ if [ $vm == "windows10" ]; then
 
     injector $domid $tpid createproc
     #injector $domid $epid shellexec
-    drakvuf $domid 1 $tpid createproc  csv /shared/syscalls.txt
-    drakvuf $domid 2 0      0   json /shared/syscalls.txt x x x /shared/dllhooks.txt
+    drakvuf $domid 1 $tpid createproc  csv ci/syscalls.txt
+    drakvuf $domid 2 0      0   json ci/syscalls.txt x x x ci/dll-hooks-list
 
-    if [ $? -gt 95 ]; then
+    overhead=$?
+
+    if [ $overhead -gt 95 ]; then
         echo "Overhead is a lot"
         exit 1
     fi
@@ -251,22 +257,11 @@ if [ $vm == "windows7-sp1-x86" ]; then
 
     injector $domid $tpid createproc
     drakvuf $domid 1 $tpid createproc csv
-    drakvuf $domid 2 0 0 json /shared/syscalls.txt
+    drakvuf $domid 2 0 0 json ci/syscalls.txt
 
-    if [ $? -gt 90 ]; then
-        echo "Overhead is a lot"
-        exit 1
-    fi
+    overhead=$?
 
-    exit 0
-fi
-
-if [ $vm == "debian-jessie" ]; then
-    echo "Received Debian Jessie Test VM ID: $domid";
-
-    drakvuf $domid 1 0 0
-
-    if [ $? -gt 90 ]; then
+    if [ $overhead -gt 90 ]; then
         echo "Overhead is a lot"
         exit 1
     fi
@@ -279,20 +274,9 @@ if [ $vm == "debian-stretch" ]; then
 
     drakvuf $domid 1 0 0 kv
 
-    if [ $? -gt 90 ]; then
-        echo "Overhead is a lot"
-        exit 1
-    fi
+    overhead=$?
 
-    exit 0
-fi
-
-if [ $vm == "ubuntu-18" ]; then
-    echo "Received Ubuntu 18.10 Test VM ID: $domid";
-
-    drakvuf $domid 1 0 0 json
-
-    if [ $? -gt 90 ]; then
+    if [ $overhead -gt 90 ]; then
         echo "Overhead is a lot"
         exit 1
     fi

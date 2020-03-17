@@ -1,2 +1,0 @@
-user32.dll,CharLowerA,1
-user32.dll,SetRect,5
