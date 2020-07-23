@@ -20,7 +20,7 @@ findpids() {
             local epid=$(findpid $domain-jenkins explorer.exe)
 
             if [ $tpid -eq 0 ] || [ $epid -eq 0 ]; then
-                echo -n "error"
+                echo -n "error:error"
             else
                 echo -n "$tpid:$epid"
             fi
@@ -30,12 +30,13 @@ findpids() {
             local epid=$(findpid $domain-jenkins explorer.exe)
 
             if [ $tpid -eq 0 ] || [ $epid -eq 0 ]; then
-                echo -n "error"
+                echo -n "error:error"
             else
                 echo -n "$tpid:$epid"
             fi
             ;;
         *)
+            echo -n "error:error"
             exit 1
     esac
 }

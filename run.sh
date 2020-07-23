@@ -125,6 +125,7 @@ drakvuf() {
             >/dev/null &
 #            >$outfolder/$vm.$runid.stdout.txt &
 
+    wait_pid=$!
     waitfor=0
     drakvuf_pid=$(finddrakvufpid $vm)
     while [ -z "$drakvuf_pid" ]
@@ -139,20 +140,34 @@ drakvuf() {
         drakvuf_pid=$(finddrakvufpid $vm)
     done
 
-    echo "DRAKVUF is running with PID $drakvuf_pid"
+    echo "DRAKVUF is running with PID $drakvuf_pid, background pid is $wait_pid"
 
     overhead $drakvuf_pid
     cpu_overhead=$?
     echo "CPU utilization average: $cpu_overhead"
 
-    kill -0 $drakvuf_pid 2>/dev/null
-    while [ $? -eq 0 ]
-    do
-        sleep 1
-        kill -0 $drakvuf_pid 2>/dev/null
-    done
+    wait $wait_pid
+    status=$?
+
+    echo "Exit status: $status"
+
+    if [ $status -ne 0 ]; then
+        destroy $domid
+        cat $outfolder/$vm.$runid.error.txt
+        exit 1
+    fi
+
+    errors=$(cat $outfolder/$vm.$runid.error.txt | wc -l)
+    echo "stderr line count: $errors"
+
+    if [ $errors -ne 1 ]; then
+        destroy $domid
+        cat $outfolder/$vm.$runid.error.txt
+        exit 1
+    fi
 
     sleep 1
+
     syscalls=$(cat $outfolder/$vm.$runid.syscall.txt)
     echo "Syscalls: $syscalls"
 
@@ -166,7 +181,7 @@ drakvuf() {
     if [ $dllhooks != "x" ]; then
         dllhooktest=$(cat $outfolder/$vm.$runid.apimon.charlowera.txt)
         echo "CharLowerA: $dllhooktest"
-        if [ $dllhooktest -lt 3 ]; then
+        if [ $dllhooktest -lt 1 ]; then
             destroy $domid
             cat $outfolder/$vm.$runid.error.txt
             exit 1
@@ -174,7 +189,7 @@ drakvuf() {
 
         dllhooktest=$(cat $outfolder/$vm.$runid.apimon.setrect.txt)
         echo "SetRect: $dllhooktest"
-        if [ $dllhooktest -lt 3 ]; then
+        if [ $dllhooktest -lt 1 ]; then
             destroy $domid
             cat $outfolder/$vm.$runid.error.txt
             exit 1
@@ -212,6 +227,14 @@ epid=${values[2]}
 
 if [ -z $domid ] || [ $domid -eq 0 ]; then
     exit 1;
+fi
+
+if [ $tpid == "error" ]; then
+    tpid=0
+fi
+
+if [ $epid == "error" ]; then
+    epid=0
 fi
 
 if [ $vm == "windows7-sp1-x64" ]; then
