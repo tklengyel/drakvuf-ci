@@ -25,7 +25,7 @@ findpids() {
                 echo -n "$tpid:$epid"
             fi
             ;;
-        "windows10")
+        "windows10" | "windows10-2004")
             local tpid=$(findpid $domain-jenkins Taskmgr.exe)
             local epid=$(findpid $domain-jenkins explorer.exe)
 
