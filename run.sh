@@ -1,8 +1,8 @@
 #!/bin/bash
 
 runtime=60 # in seconds
-sigtime=70 # in seconds
-timeout=80 # in seconds
+sigtime=$((runtime+10))
+timeout=$((sigtime+10))
 vm="$1"
 workspace="$2"
 libvmipath="$3"
@@ -49,8 +49,9 @@ destroy() {
 
 injector() {
     domid=$1
-    pid=$2
-    injector_mode=$3
+    kpgd=$2
+    pid=$3
+    injector_mode=$4
 
     if [ $pid -eq 0 ]; then
         exit 1;
@@ -60,7 +61,7 @@ injector() {
 
     LD_LIBRARY_PATH=$libvmipath/lib \
         timeout --preserve-status -k $timeout $sigtime \
-        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -i $pid -e calc.exe -m $injector_mode \
+        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid -e calc.exe -m $injector_mode \
         1>$outfolder/$vm.$injector_mode.output.txt 2>&1
 
     if [ $? -ne 0 ]; then
@@ -76,7 +77,8 @@ injector() {
 
 inject_autoruns() {
     domid=$1
-    pid=$2
+    kpgd=$2
+    pid=$3
 
     if [ $pid -eq 0 ]; then
         exit 1;
@@ -86,7 +88,7 @@ inject_autoruns() {
 
     LD_LIBRARY_PATH=$libvmipath/lib \
         timeout --preserve-status -k $timeout $sigtime \
-        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -i $pid \
+        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid \
             -m writefile \
             -e 'C:\\autoruns64.exe' \
             -B $AUTORUNS \
@@ -104,7 +106,7 @@ inject_autoruns() {
 
     LD_LIBRARY_PATH=$libvmipath/lib \
         timeout --preserve-status -k $timeout $sigtime \
-        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -i $pid \
+        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid \
             -e 'C:\\autoruns64.exe' \
         1>$outfolder/$vm.autoruns.output.txt 2>&1
 
@@ -148,17 +150,21 @@ run_valgrind() {
 
 drakvuf() {
     domid=$1
-    runid=$2
-    pid=${3:-0}
-    injector_mode=${4:-0}
-    output=${5:-"default"}
-    filter=${6:-"x"}
-    tcpip=${7:-"x"}
-    wow64=${8:-"x"}
-    win32k=${9:-"x"}
-    dllhooks=${10:-"x"}
+    runid=${2:-1}
+    kpgd=${3:-"0"}
+    pid=${4:-0}
+    injector_mode=${5:-0}
+    output=${6:-"default"}
+    filter=${7:-"x"}
+    tcpip=${8:-"x"}
+    wow64=${9:-"x"}
+    win32k=${10:-"x"}
+    dllhooks=${11:-"x"}
 
     opts=""
+    if [ $kpgd != "0" ]; then
+        opts="$opts -k $kpgd"
+    fi
     if [ $pid -ne 0 ]; then
         opts="$opts -i $pid -e calc.exe -m $injector_mode"
     fi
@@ -189,6 +195,7 @@ drakvuf() {
             $workspace/src/drakvuf \
                 -r $cfgfolder/$vm.json \
                 -d $domid \
+                -k $kpgd \
                 -t $runtime \
                 -b \
                 -o $output \
@@ -273,55 +280,109 @@ drakvuf() {
 
     return $cpu_overhead
 }
+
+do_reset() {
+    domid=0
+
+    if [ $reset == "-" ]; then
+        echo "Not running environment reset.."
+
+        domid=$(xl domid "$vm-jenkins")
+        if [ -z $domid ]; then
+            domid=0
+        fi
+
+        pids=$(findpids $vm)
+        reset_result="$domid:$pids"
+        echo "Reset result: $reset_result"
+
+    else
+        echo "Running environment reset..";
+        reset_result=$($cifolder/reset.sh $vm)
+        values=(${reset_result//:/ })
+        echo "Reset result: $reset_result"
+
+        if [ ${values[0]} -eq 0 ]; then
+            reset_result=$($cifolder/reset.sh $vm);
+            values=(${reset_result//:/ })
+            echo "Re-trying reset: $reset_result";
+        fi
+
+        if [ ${values[0]} -eq 0 ]; then
+            exit 1
+        fi
+    fi
+
+    values=(${reset_result//:/ })
+    domid=${values[0]}
+    tpid=${values[1]}
+    epid=${values[2]}
+    kpgd=${values[3]}
+
+    if [ -z $domid ] || [ $domid -eq 0 ] || [ $domid == "error" ]; then
+        exit 1;
+    fi
+
+    if [ $tpid == "error" ]; then
+        tpid=0
+    fi
+
+    if [ $epid == "error" ]; then
+        epid=0
+    fi
+
+    if [ $kpgd == "error" ]; then
+        kpgd=0
+    fi
+}
+
 #################################################################
 
+if [ $vm == "stresstest" ]; then
+    echo "Running stresstest"
 
-if [ $reset != "-" ]; then
-    echo "Running environment reset..";
-    reset_result=$($cifolder/reset.sh $vm)
-    values=(${reset_result//:/ })
-    echo "Reset result: $reset_result"
+    vm="debian-stretch"
+    runtime=600
+    sigtime=610
+    timeout=620
 
-    if [ ${values[0]} -eq 0 ]; then
-        reset_result=$($cifolder/reset.sh $vm);
+    for i in {1..20}
+    do
+        reset_result=$($cifolder/reset.sh $vm jenkins$i 512M)
         values=(${reset_result//:/ })
-        echo "Re-trying reset: $reset_result";
+        domid=${values[0]}
+
+        drakvuf $domid $i &
+    done
+
+    sleep $timeout
+    dead=0
+
+    for i in {1..20}
+    do
+        xl destroy debian-stretch-jenkins$i || dead=$((dead+1))
+        lvremove -f debian-stretch-jenkins$1 || :
+    done
+
+    echo "Stresstest done. Dead/missing VMs: $dead"
+
+    if [ $dead -gt 0 ]; then
+        exit 1;
     fi
 
-    if [ ${values[0]} -eq 0 ]; then
-        exit 1
-    fi
-else
-    domid=$(xl domid "$vm-jenkins")
-    pids=$(findpids $vm)
-    reset_result="$domid:$pids"
+    exit 0
 fi
 
-values=(${reset_result//:/ })
-domid=${values[0]}
-tpid=${values[1]}
-epid=${values[2]}
-
-if [ -z $domid ] || [ $domid -eq 0 ]; then
-    exit 1;
-fi
-
-if [ $tpid == "error" ]; then
-    tpid=0
-fi
-
-if [ $epid == "error" ]; then
-    epid=0
-fi
+do_reset
 
 if [ $vm == "windows7-sp1-x64" ]; then
     echo "Received Windows 7 x64 Test VM ID: $domid $tpid $epid";
 
-    injector $domid $tpid createproc
-    injector $domid $tpid createproc
-    injector $domid $epid shellexec
-    drakvuf $domid 1 $tpid createproc  csv
-    drakvuf $domid 2 0      0           json    ci/syscalls.txt
+    injector $domid $kpgd $tpid createproc
+    injector $domid $kpgd $tpid createproc
+    injector $domid $kpgd $epid shellexec
+    drakvuf $domid 1 $kpgd $tpid createproc  csv
+    drakvuf $domid 2 $kpgd 0      0           json    ci/syscalls.txt
     #drakvuf $domid 3 0      0           default x                    x x /shared/windows7-sp1-x64/win32k.json
 
     overhead=$?
@@ -335,11 +396,11 @@ fi
 if [ $vm == "windows10" ]; then
     echo "Received Windows 10 x64 Test VM ID: $domid $tpid $epid";
 
-    injector $domid $tpid createproc
+    injector $domid $kpgd $tpid createproc
     #injector $domid $epid shellexec
     #drakvuf $domid 1 $tpid createproc  csv ci/syscalls.txt
-    drakvuf $domid 1 0      0   csv ci/syscalls.txt
-    drakvuf $domid 2 0      0   json ci/syscalls.txt x x x ci/dll-hooks-list
+    drakvuf $domid 1 $kpgd 0      0   csv ci/syscalls.txt
+    drakvuf $domid 2 $kpgd 0      0   json ci/syscalls.txt x x x ci/dll-hooks-list
 
     overhead=$?
 
@@ -354,10 +415,10 @@ if [ $vm == "windows10-2004" ]; then
 
     #injector $domid $tpid createproc
     #injector $domid $epid shellexec
-    inject_autoruns $domid $tpid
-    drakvuf $domid 1 $tpid createproc  csv ci/syscalls.txt
+    inject_autoruns $domid $kpgd $tpid
+    drakvuf $domid 1 $kpgd $tpid createproc  csv ci/syscalls.txt
     #drakvuf $domid 1 0      0   csv ci/syscalls.txt
-    drakvuf $domid 2 0      0   kv ci/syscalls.txt
+    drakvuf $domid 2 $kpgd 0      0   kv ci/syscalls.txt
 
     overhead=$?
 
@@ -370,9 +431,9 @@ fi
 if [ $vm == "windows7-sp1-x86" ]; then
     echo "Received Windows 7 x86 Test VM ID: $domid $tpid $epid";
 
-    injector $domid $tpid createproc
-    drakvuf $domid 1 $tpid createproc csv
-    drakvuf $domid 2 0 0 json ci/syscalls.txt
+    injector $domid $kpgd $tpid createproc
+    drakvuf $domid 1 $kpgd $tpid createproc csv
+    drakvuf $domid 2 $kpgd 0 0 json ci/syscalls.txt
 
     overhead=$?
 
