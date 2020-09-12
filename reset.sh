@@ -7,6 +7,7 @@ folder="/shared/cfg"
 cifolder="/shared/drakvuf-ci/"
 vms="windows7-sp1-x86-jenkins windows7-sp1-x64-jenkins windows10-jenkins windows10-2004-jenkins debian-stretch-jenkins"
 
+. $cifolder/setenv.sh
 . $cifolder/findpid.sh
 
 clone_do() {
@@ -45,6 +46,7 @@ clean() {
 }
 
 #clean
+set_libvmi_env
 
 domid=$(clone)
 pids=$(findpids $domain $clone)

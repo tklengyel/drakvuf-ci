@@ -1,14 +1,24 @@
 #!/bin/bash
-findpid() {
+do_findpid() {
     local domain=$1
     local task=$2
-    local pid=$(vmi-process-list $domain 2>/dev/null | grep $task | tail -n1 | awk -F' ' '{print $2}' | awk -F']' '{print $1}')
+    local pid=$(timeout -k 10 5 vmi-process-list $domain 2>/dev/null | grep $task | tail -n1 | awk -F' ' '{print $2}' | awk -F']' '{print $1}')
 
     if [ -z $pid ]; then
-        echo 0
+        echo -n 0
     else
-        echo $pid
+        echo -n $pid
     fi
+}
+
+findpid() {
+    local pid=$(do_findpid $1 $2)
+
+    if [ $pid == "0" ]; then
+        pid=$(do_findpid $1 $2)
+    fi
+
+    echo -n $pid
 }
 
 findpids() {

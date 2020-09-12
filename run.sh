@@ -5,7 +5,7 @@ sigtime=$((runtime+10))
 timeout=$((sigtime+10))
 vm="$1"
 workspace="$2"
-libvmipath="$3"
+libvmipath=${3:-LIBVMI}
 reset=${4:-"-"}
 outfolder=/shared/tmp
 cfgfolder=/shared/cfg
@@ -16,7 +16,7 @@ AUTORUNS=/shared/sysinternals/Autoruns64.exe
 
 #############################################################
 finddrakvufpid() {
-    ps aux | grep drakvuf | grep $1 | grep -v timeout | grep -v sudo | grep -v "drakvuf-ci" | grep -m 1 drakvuf | awk '{print $2}'
+    ps aux | grep drakvuf | grep "d $1" | grep -v timeout | grep -v sudo | grep -v "drakvuf-ci" | grep -m 1 drakvuf | awk '{print $2}'
 }
 
 overhead() {
@@ -209,7 +209,7 @@ drakvuf() {
 
     wait_pid=$!
     waitfor=0
-    drakvuf_pid=$(finddrakvufpid $vm)
+    drakvuf_pid=$(finddrakvufpid $domid)
     while [ -z "$drakvuf_pid" ]
     do
         ((waitfor++));
@@ -346,7 +346,7 @@ if [ $vm == "stresstest" ]; then
     sigtime=610
     timeout=620
 
-    for i in {1..20}
+    for i in {1..10}
     do
         reset_result=$($cifolder/reset.sh $vm jenkins$i 512M)
         values=(${reset_result//:/ })
@@ -358,10 +358,10 @@ if [ $vm == "stresstest" ]; then
     sleep $timeout
     dead=0
 
-    for i in {1..20}
+    for i in {1..10}
     do
         xl destroy debian-stretch-jenkins$i || dead=$((dead+1))
-        lvremove -f debian-stretch-jenkins$1 || :
+        lvremove -f debian-stretch-jenkins$i || :
     done
 
     echo "Stresstest done. Dead/missing VMs: $dead"
