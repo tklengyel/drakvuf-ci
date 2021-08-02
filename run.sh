@@ -219,14 +219,19 @@ drakvuf() {
     wow64=${9:-"x"}
     win32k=${10:-"x"}
     dllhooks=${11:-"x"}
-    check_mouse=${12:-"x"}
+    check_mouse_move=${12:-"x"}
+    check_button_click=${13:-"x"}
 
     opts=""
     if [ $kpgd != "0" ]; then
         opts="$opts -k $kpgd"
     fi
     if [ $pid -ne 0 ]; then
-        opts="$opts -i $pid -e calc.exe -m $injector_mode"
+        if [ ${check_button_click} != "x" ]; then
+            opts="$opts -i $pid -e $CHECK_BUTTON_CLICK_EXE -m $injector_mode"
+        else
+            opts="$opts -i $pid -e calc.exe -m $injector_mode"
+        fi
     fi
     if [ $filter != "x" ]; then
         path=$workspace/$filter
@@ -247,7 +252,9 @@ drakvuf() {
         opts="$opts -a memdump -a apimon"
         opts="$opts --dll-hooks $path"
     fi
-
+    if [ ${check_button_click} != "x" ]; then
+        opts="$opts -a hidsim --hid-monitor-gui"
+    fi
     echo "Running DRAKVUF #$runid for $runtime seconds. Opts: $opts"
     LD_LIBRARY_PATH=$libvmipath/lib \
     G_SLICE=debug-blocks \
@@ -284,7 +291,7 @@ drakvuf() {
 
     echo "DRAKVUF is running with PID $drakvuf_pid, background pid is $wait_pid"
 
-    if [ ${check_mouse} != "x" ]; then
+    if [ ${check_mouse_move} != "x" ]; then
         echo "Testing mouse movement activity in $vm-jenkins"
 
         count=$(LD_LIBRARY_PATH=$libvmipath/lib $libvmipath/bin/vmi-process-list $vm-jenkins | grep check_mouse_movement | wc -l)
@@ -299,6 +306,20 @@ drakvuf() {
         fi
     fi
 
+    if [ ${check_button_click} != "x" ]; then
+        echo "Testing automatic button clicking in $vm-jenkins"
+
+        count=$(LD_LIBRARY_PATH=$libvmipath/lib $libvmipath/bin/vmi-process-list $vm-jenkins | grep check_button_click | wc -l)
+        if [ $count -eq 0 ]; then
+            echo "check_mouse_button_click.exe-process not present"
+            echo "Hidsim-plugin --hid-monitor-gui seems to work"
+        else
+            echo "Found $count check_button_click.exe-processes"
+            echo "Hidsim-plugin failed"
+            destroy $domid
+            exit 1
+        fi
+    fi
     overhead $drakvuf_pid
     cpu_overhead=$?
     echo "CPU utilization average: $cpu_overhead"
@@ -469,8 +490,8 @@ if [ $vm == "windows7-sp1-x64" ]; then
 
     # Inject ${CHECK_MOUSE_MOVEMENT_EXE}
     setup_check_mouse_movement $domid $kpgd $tpid createproc
-    # Run DRAKVUF and check, if mouse movement occured
-    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse
+    # Run DRAKVUF and check, if mouse movement occurs
+    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse_move
 fi
 
 if [ $vm == "windows10" ]; then
@@ -491,8 +512,8 @@ if [ $vm == "windows10" ]; then
 
     # Inject ${CHECK_MOUSE_MOVEMENT_EXE}
     setup_check_mouse_movement $domid $kpgd $tpid createproc
-    # Run DRAKVUF and check, if mouse movement occured
-    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse
+    # Run DRAKVUF and check, if mouse movement occurs
+    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse_move
 fi
 
 if [ $vm == "windows10-2004" ]; then
@@ -513,8 +534,8 @@ if [ $vm == "windows10-2004" ]; then
 
     # Inject ${CHECK_MOUSE_MOVEMENT_EXE}
     setup_check_mouse_movement $domid $kpgd $tpid createproc
-    # Run DRAKVUF and check, if mouse movement occured
-    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse
+    # Run DRAKVUF and check, if mouse movement occurs
+    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse_move
 
 fi
 
@@ -534,8 +555,11 @@ if [ $vm == "windows7-sp1-x86" ]; then
 
     # Inject ${CHECK_MOUSE_MOVEMENT_EXE}
     setup_check_mouse_movement $domid $kpgd $tpid createproc
-    # Run DRAKVUF and check, if mouse movement occured
-    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse
+    # Run DRAKVUF and check, if mouse movement occurs
+    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse_move
+
+    # Run DRAKVUF and check, if button clicking works
+    drakvuf $domid 4 $kpgd $tpid createproc 0 0 0 0 /shared/windows7-sp1-x86/win32k.json 0 0 check_button_click
 fi
 
 if [ $vm == "debian-stretch" ]; then
