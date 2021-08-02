@@ -11,6 +11,9 @@ outfolder=/shared/tmp
 cfgfolder=/shared/cfg
 cifolder=/shared/drakvuf-ci
 AUTORUNS=/shared/sysinternals/Autoruns64.exe
+# Test scripts for hidsim-plugin
+CHECK_MOUSE_MOVEMENT_EXE=${cifolder}/check_mouse_movement.exe
+CHECK_BUTTON_CLICK_EXE=${cifolder}/check_button_click.exe
 
 . $cifolder/findpid.sh
 
@@ -132,6 +135,62 @@ inject_autoruns() {
     rm $outfolder/$vm.autoruns.output.txt
 }
 
+setup_check_mouse_movement() {
+    domid=$1
+    kpgd=$2
+    pid=$3
+
+    if [ $pid -eq 0 ]; then
+        exit 1;
+    fi
+
+    echo "Running Injector to write ${CHECK_MOUSE_MOVEMENT_EXE} into guest through PID $pid"
+
+    LD_LIBRARY_PATH=$libvmipath/lib \
+        timeout --preserve-status -k $timeout $sigtime \
+        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid \
+            -m writefile \
+            -e 'C:\\check_mouse_movement.exe' \
+            -B ${CHECK_MOUSE_MOVEMENT_EXE} \
+        1>$outfolder/$vm.check_mouse_movement.output.txt 2>&1
+
+    if [ $? -ne 0 ]; then
+        cat $outfolder/$vm.check_mouse_movement.output.txt
+        rm $outfolder/$vm.check_mouse_movement.output.txt
+        destroy $domid
+        exit 1
+    fi
+
+    # file was written into the guest, now execute it
+    echo "Placed ${CHECK_MOUSE_MOVEMENT_EXE} into VM, now executing"
+
+    LD_LIBRARY_PATH=$libvmipath/lib \
+        timeout --preserve-status -k $timeout $sigtime \
+        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid \
+            -e 'C:\\check_mouse_movement.exe' \
+        1>$outfolder/$vm.check_mouse_movement.output.txt 2>&1
+
+    if [ $? -ne 0 ]; then
+        cat $outfolder/$vm.check_mouse_movement.output.txt
+        rm $outfolder/$vm.check_mouse_movement.output.txt
+        destroy $domid
+        exit 1
+    fi
+
+    # check that the process is running
+    count=$(LD_LIBRARY_PATH=$libvmipath/lib $libvmipath/bin/vmi-process-list $vm-jenkins | grep check_mouse_movement | wc -l)
+    echo "check_mouse_movement.exe-process found: $count"
+
+    if [ $count -ne 1 ]; then
+        cat $outfolder/$vm.check_mouse_movement.output.txt
+        rm $outfolder/$vm.check_mouse_movement.output.txt
+        destroy $domid
+        exit 1
+    fi
+
+    rm $outfolder/$vm.check_mouse_movement.output.txt
+}
+
 run_valgrind() {
     echo "Running Valgrind on $vm-jenkins"
 
@@ -160,6 +219,7 @@ drakvuf() {
     wow64=${9:-"x"}
     win32k=${10:-"x"}
     dllhooks=${11:-"x"}
+    check_mouse=${12:-"x"}
 
     opts=""
     if [ $kpgd != "0" ]; then
@@ -224,6 +284,21 @@ drakvuf() {
 
     echo "DRAKVUF is running with PID $drakvuf_pid, background pid is $wait_pid"
 
+    if [ ${check_mouse} != "x" ]; then
+        echo "Testing mouse movement activity in $vm-jenkins"
+
+        count=$(LD_LIBRARY_PATH=$libvmipath/lib $libvmipath/bin/vmi-process-list $vm-jenkins | grep check_mouse_movement | wc -l)
+        if [ $count -eq 0 ]; then
+            echo "check_mouse_movement.exe-process not present"
+            echo "Hidsim-plugin seems to work"
+        else
+            echo "Found $count check_mouse_movement.exe-processes"
+            echo "Hidsim-plugin failed"
+            destroy $domid
+            exit 1
+        fi
+    fi
+
     overhead $drakvuf_pid
     cpu_overhead=$?
     echo "CPU utilization average: $cpu_overhead"
@@ -255,7 +330,7 @@ drakvuf() {
 
     re='^[0-9]+$'
     if ! [[ $syscalls =~ $re ]] || [ $syscalls -lt 10 ]; then
-	    destroy $domid
+        destroy $domid
         cat $outfolder/$vm.$runid.error.txt
         exit 1
     fi
@@ -391,6 +466,11 @@ if [ $vm == "windows7-sp1-x64" ]; then
         echo "Overhead is a lot"
         exit 1
     fi
+
+    # Inject ${CHECK_MOUSE_MOVEMENT_EXE}
+    setup_check_mouse_movement $domid $kpgd $tpid createproc
+    # Run DRAKVUF and check, if mouse movement occured
+    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse
 fi
 
 if [ $vm == "windows10" ]; then
@@ -408,6 +488,11 @@ if [ $vm == "windows10" ]; then
         echo "Overhead is a lot"
         exit 1
     fi
+
+    # Inject ${CHECK_MOUSE_MOVEMENT_EXE}
+    setup_check_mouse_movement $domid $kpgd $tpid createproc
+    # Run DRAKVUF and check, if mouse movement occured
+    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse
 fi
 
 if [ $vm == "windows10-2004" ]; then
@@ -419,13 +504,18 @@ if [ $vm == "windows10-2004" ]; then
     drakvuf $domid 1 $kpgd $tpid createproc  csv ci/syscalls.txt
     #drakvuf $domid 1 0      0   csv ci/syscalls.txt
     drakvuf $domid 2 $kpgd 0      0   kv ci/syscalls.txt
-
     overhead=$?
 
     if [ $overhead -gt 95 ]; then
         echo "Overhead is a lot"
         exit 1
     fi
+
+    # Inject ${CHECK_MOUSE_MOVEMENT_EXE}
+    setup_check_mouse_movement $domid $kpgd $tpid createproc
+    # Run DRAKVUF and check, if mouse movement occured
+    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse
+
 fi
 
 if [ $vm == "windows7-sp1-x86" ]; then
@@ -441,6 +531,11 @@ if [ $vm == "windows7-sp1-x86" ]; then
         echo "Overhead is a lot"
         exit 1
     fi
+
+    # Inject ${CHECK_MOUSE_MOVEMENT_EXE}
+    setup_check_mouse_movement $domid $kpgd $tpid createproc
+    # Run DRAKVUF and check, if mouse movement occured
+    drakvuf $domid 3 $kpgd 0 0 0 0 0 0 0 0 check_mouse
 fi
 
 if [ $vm == "debian-stretch" ]; then
