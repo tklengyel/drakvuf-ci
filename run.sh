@@ -260,7 +260,6 @@ drakvuf() {
     G_SLICE=debug-blocks \
         timeout --preserve-status -k $timeout $sigtime \
             $workspace/src/drakvuf \            
-                -v \
                 -r $cfgfolder/$vm.json \
                 -d $domid \
                 -k $kpgd \
