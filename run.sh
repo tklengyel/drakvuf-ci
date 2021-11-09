@@ -259,7 +259,7 @@ drakvuf() {
     LD_LIBRARY_PATH=$libvmipath/lib \
     G_SLICE=debug-blocks \
         timeout --preserve-status -k $timeout $sigtime \
-            $workspace/src/drakvuf \            
+            $workspace/src/drakvuf \
                 -r $cfgfolder/$vm.json \
                 -d $domid \
                 -k $kpgd \
