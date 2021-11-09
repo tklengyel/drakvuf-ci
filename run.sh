@@ -64,7 +64,7 @@ injector() {
 
     LD_LIBRARY_PATH=$libvmipath/lib \
         timeout --preserve-status -k $timeout $sigtime \
-        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid -e calc.exe -m $injector_mode \
+        $workspace/src/injector -v -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid -e calc.exe -m $injector_mode \
         1>$outfolder/$vm.$injector_mode.output.txt 2>&1
 
     if [ $? -ne 0 ]; then
@@ -91,7 +91,7 @@ inject_autoruns() {
 
     LD_LIBRARY_PATH=$libvmipath/lib \
         timeout --preserve-status -k $timeout $sigtime \
-        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid \
+        $workspace/src/injector -v -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid \
             -m writefile \
             -e 'C:\\autoruns64.exe' \
             -B $AUTORUNS \
@@ -109,7 +109,7 @@ inject_autoruns() {
 
     LD_LIBRARY_PATH=$libvmipath/lib \
         timeout --preserve-status -k $timeout $sigtime \
-        $workspace/src/injector -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid \
+        $workspace/src/injector -v -r $cfgfolder/$vm.json -d $domid -k $kpgd -i $pid \
             -e 'C:\\autoruns64.exe' \
         1>$outfolder/$vm.autoruns.output.txt 2>&1
 
